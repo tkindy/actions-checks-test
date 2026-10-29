@@ -1,0 +1,70 @@
+name: Canonical CI
+on:
+  pull_request:
+    types: [opened, reopened, synchronize]
+    branches-ignore: ['**/graphite-base/**']
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        required: true
+        type: string
+      expected_head:
+        required: true
+        type: string
+      expected_base:
+        required: true
+        type: string
+permissions:
+  contents: read
+  pull-requests: read
+concurrency:
+  group: canonical-ci-${{ github.event.pull_request.number || inputs.pr_number }}
+  cancel-in-progress: true
+jobs:
+  ci:
+    name: CI Result
+    if: github.event_name == 'workflow_dispatch' || startsWith(github.head_ref, 'tk/ci-probe-')
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - name: Resolve and validate PR context
+        id: resolve
+        uses: actions/github-script@v7
+        env:
+          INPUT_PR: ${{ inputs.pr_number }}
+          EXPECTED_HEAD: ${{ inputs.expected_head || github.event.pull_request.head.sha }}
+          EXPECTED_BASE: ${{ inputs.expected_base || github.event.pull_request.base.sha }}
+        with:
+          script: |
+            const number = Number(process.env.INPUT_PR || context.payload.pull_request.number);
+            let pr;
+            for (let attempt = 0; attempt < 10; attempt++) {
+              ({ data: pr } = await github.rest.pulls.get({ ...context.repo, pull_number: number }));
+              if (pr.mergeable !== null && pr.merge_commit_sha) break;
+              await new Promise(resolve => setTimeout(resolve, 2000));
+            }
+            if (pr.head.sha !== process.env.EXPECTED_HEAD || pr.base.sha !== process.env.EXPECTED_BASE) {
+              throw new Error('Superseded PR context');
+            }
+            if (!pr.mergeable || !pr.merge_commit_sha) throw new Error('PR has no testable merge commit');
+            core.setOutput('merge_sha', pr.merge_commit_sha);
+            core.setOutput('pr_number', number);
+            core.info(JSON.stringify({ event: context.eventName, head: pr.head.sha, base: pr.base.sha, merge: pr.merge_commit_sha }));
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ steps.resolve.outputs.merge_sha }}
+          persist-credentials: false
+      - name: Simulate CI
+        env:
+          EXPECTED_MERGE: ${{ steps.resolve.outputs.merge_sha }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$EXPECTED_MERGE"
+          python3 -u - <<'PY'
+          import json, time
+          config = json.load(open('probe.json'))
+          print(json.dumps(config), flush=True)
+          for remaining in range(config['seconds'], 0, -10):
+              print(f'CI running: {remaining}s remaining', flush=True)
+              time.sleep(min(remaining, 10))
+          raise SystemExit(0 if config['outcome'] == 'success' else 1)
+          PY

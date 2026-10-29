@@ -1,0 +1,28 @@
+name: Metadata Listener
+on:
+  pull_request:
+    types: [edited, labeled, unlabeled]
+permissions:
+  actions: write
+  contents: read
+  pull-requests: read
+jobs:
+  dispatch:
+    name: Dispatch base change
+    if: github.event.action == 'edited' && github.event.changes.base.ref != null && startsWith(github.head_ref, 'tk/ci-probe-') && !startsWith(github.base_ref, 'graphite-base/')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            const pr = context.payload.pull_request;
+            await github.rest.actions.createWorkflowDispatch({
+              ...context.repo,
+              workflow_id: 'ci.yml',
+              ref: pr.head.ref,
+              inputs: {
+                pr_number: String(pr.number),
+                expected_head: pr.head.sha,
+                expected_base: pr.base.sha,
+              },
+            });

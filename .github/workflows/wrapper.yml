@@ -1,0 +1,12 @@
+name: Wrapper Control
+on:
+  pull_request:
+    types: [opened, reopened, synchronize, edited]
+    branches-ignore: ['**/graphite-base/**']
+permissions:
+  contents: read
+jobs:
+  run:
+    name: Wrapper
+    if: github.head_ref == 'tk/wrapper-probe' && (github.event.action != 'edited' || github.event.changes.base.ref != null)
+    uses: ./.github/workflows/wrapper-jobs.yml

@@ -1,0 +1,23 @@
+name: Wrapper Jobs
+on:
+  workflow_call:
+permissions:
+  contents: read
+concurrency:
+  group: wrapper-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  result:
+    name: Wrapper Result
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@v6
+      - run: |
+          python3 -u - <<'PY'
+          import json, time
+          config = json.load(open('probe.json'))
+          print(json.dumps(config), flush=True)
+          time.sleep(config['seconds'])
+          raise SystemExit(0 if config['outcome'] == 'success' else 1)
+          PY
